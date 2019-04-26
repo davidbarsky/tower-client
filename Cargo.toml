@@ -1,11 +1,10 @@
 [package]
-name = "async-experiments"
+name = "tower-client"
 version = "0.1.0"
 authors = ["David Barsky <dbarsky@amazon.com>"]
 edition = "2018"
 
 [dependencies]
-# futures-preview = { version = "0.3.0-alpha.14", features = ["io-compat"] }
 hyper = "0.12"
 pin-utils = "0.1.0-alpha.4"
 tokio = { git = "https://github.com/tokio-rs/tokio", features = ["async-await-preview"] }
