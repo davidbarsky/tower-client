@@ -9,7 +9,6 @@ use tower::{
     builder::ServiceBuilder, limit::RateLimit, load_shed::LoadShed, timeout::Timeout,
     util::ServiceExt, Service,
 };
-use tower_http::BodyExt;
 use tower_test::mock;
 
 pub use tower_hyper::{client::Client, Body};
@@ -20,12 +19,15 @@ type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 struct Origin {
     origin: String,
 }
-pub struct Svc {
-    inner: Timeout<RateLimit<LoadShed<Client<HttpConnector, Body>>>>,
+pub struct Svc<T> {
+    inner: Timeout<RateLimit<LoadShed<T>>>,
 }
 
-impl Svc {
-    pub fn new(svc: Client<HttpConnector, Body>) -> Self {
+impl<T> Svc<T>
+where
+    T: Service<Request<Body>>,
+{
+    pub fn new(svc: T) -> Self {
         let inner = ServiceBuilder::new()
             .timeout(Duration::from_secs(500))
             .rate_limit(100, Duration::from_millis(100))
@@ -34,15 +36,6 @@ impl Svc {
         Self { inner }
     }
 
-    // pub fn new(svc: Client<HttpConnector, Body>) -> Self {
-    //     let inner = ServiceBuilder::new()
-    //         .timeout(Duration::from_secs(500))
-    //         .rate_limit(100, Duration::from_millis(100))
-    //         .load_shed()
-    //         .service(svc);
-    //     Self { inner }
-    // }
-
     pub async fn call(&mut self, req: Request<Body>) -> Result<Response<Body>, Error> {
         let svc = &mut self.inner;
         await!(svc.ready())?;
@@ -50,7 +43,7 @@ impl Svc {
     }
 }
 
-impl Default for Svc {
+impl Default for Svc<Client<HttpConnector, Body>> {
     fn default() -> Self {
         Svc::new(Client::new())
     }
