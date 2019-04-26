@@ -1,31 +1,40 @@
 #![feature(async_await, await_macro)]
 
-use http::{Request, Response};
+use http::{Method, Request, Response, StatusCode, Uri};
 use hyper::client::HttpConnector;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tokio::await;
+use tokio::{
+    await,
+    prelude::{Async, Poll},
+};
 use tower::{
     builder::ServiceBuilder, limit::RateLimit, load_shed::LoadShed, timeout::Timeout,
     util::ServiceExt, Service,
 };
-use tower_test::mock;
+use tower_test::{assert_request_eq, mock};
 
 pub use tower_hyper::{client::Client, Body};
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+type Error = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Origin {
     origin: String,
 }
-pub struct Svc<T> {
+
+pub struct Svc<T>
+where
+    T: Service<Request<Body>>,
+    T::Error: Into<Error>,
+{
     inner: Timeout<RateLimit<LoadShed<T>>>,
 }
 
-impl<T> Svc<T>
+impl<T, R> Svc<T>
 where
-    T: Service<Request<Body>>,
+    T: Service<R>,
+    T::Error: Into<Error>,
 {
     pub fn new(svc: T) -> Self {
         let inner = ServiceBuilder::new()
@@ -36,7 +45,7 @@ where
         Self { inner }
     }
 
-    pub async fn call(&mut self, req: Request<Body>) -> Result<Response<Body>, Error> {
+    pub async fn call(&mut self, req: R) -> Result<T::Response, Error> {
         let svc = &mut self.inner;
         await!(svc.ready())?;
         await!(svc.call(req))
@@ -52,15 +61,14 @@ impl Default for Svc<Client<HttpConnector, Body>> {
 type Mock = mock::Mock<Request<Body>, Response<Body>>;
 type Handle = mock::Handle<Request<Body>, Response<Body>>;
 
-fn new_mock() -> (Mock, Handle) {
-    mock::pair()
+fn new_mock() -> (Svc<Mock>, Handle) {
+    let (svc, handle) = mock::pair();
+    (Svc::new(svc), handle)
 }
 
 #[test]
 fn hello() -> Result<(), Error> {
     let (mut svc, mut handle) = new_mock();
-    let ready = svc.poll_ready()?.is_ready();
-    assert!(ready);
 
     let uri: Uri = "http://httpbin.org/ip".parse()?;
     let req = Request::builder()
@@ -68,7 +76,11 @@ fn hello() -> Result<(), Error> {
         .uri(uri)
         .body(Body::from(hyper::Body::empty()))?;
 
-    let response = svc.call(req);
+    let mut response = svc.call(req);
+
+    let send_response = Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(hyper::Body::empty()))?;
 
     Ok(())
 }
