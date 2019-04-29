@@ -51,3 +51,52 @@ impl Default for Svc<Client<HttpConnector, Body>, Request<Body>> {
         Svc::new(Client::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tokio::{
+        await,
+        prelude::future::{poll_fn},
+    };
+    use tower_test::mock;
+
+    use crate::{Error, Svc};
+
+    type Mock = mock::Mock<String, String>;
+    type Handle = mock::Handle<String, String>;
+
+    fn new_mock() -> (Svc<Mock, String>, Handle) {
+        let (svc, handle) = mock::pair();
+        (Svc::new(svc), handle)
+    }
+
+    #[test]
+    fn hello() -> Result<(), Error> {
+        let (mut svc, mut handle) = new_mock();
+        let req = String::from("hello, ");
+
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+
+        let fut = async move {
+            dbg!("Sending req");
+            let resp = svc.call(req);
+
+            // on the side of the "server"...
+            dbg!("polling readiness of handle");
+            let pair = poll_fn(move || handle.poll_request());
+            dbg!("awaiting poll");
+            let pair = await!(pair).unwrap();
+            dbg!("accepted req");
+            let (req, handle) = pair.unwrap();
+            assert_eq!(req, String::from("hello, "));
+            handle.send_response(String::from("world!"));
+
+            let resp = await!(resp).unwrap();
+            assert_eq!(resp, String::from("world!"));
+        };
+
+        rt.block_on_async(fut);
+
+        Ok(())
+    }
+}
